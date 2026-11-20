@@ -38,7 +38,7 @@ async def lookup_virustotal(
     settings = get_settings()
     start = time.perf_counter()
 
-    if settings.virustotal_api_key:
+    if settings.virustotal_api_key and settings.enable_live_public_lookups:
         headers = {"x-apikey": settings.virustotal_api_key}
         if kind == "url":
             url_id = base64.urlsafe_b64encode(value.encode()).decode().strip("=")

@@ -51,6 +51,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=$ROOT_DIR/analysis-engine
+EnvironmentFile=-$ROOT_DIR/analysis-engine/.env
 Environment=PYTHONPATH=$ROOT_DIR/analysis-engine
 ExecStart=$ROOT_DIR/analysis-engine/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8088
 Restart=always
@@ -89,7 +90,7 @@ if [ -n "$CLOUDFLARED_BIN" ] && [ -x "$CLOUDFLARED_BIN" ]; then
 [Unit]
 Description=THREATLENS AI Public HTTPS Cloudflare Tunnel
 After=network-online.target threatlens-web.service
-Requires=threatlens-web.service
+Wants=threatlens-web.service
 
 [Service]
 Type=simple
@@ -105,14 +106,17 @@ fi
 systemctl --user daemon-reload
 systemctl --user enable --now threatlens-postgres.service
 sleep 2
-systemctl --user enable --now threatlens-engine.service
-systemctl --user restart threatlens-web.service
+systemctl --user enable threatlens-engine.service
+systemctl --user restart threatlens-engine.service
 systemctl --user enable threatlens-web.service
+systemctl --user restart threatlens-web.service
 
 if [ -f "$SYSTEMD_DIR/threatlens-tunnel.service" ]; then
-  rm -f "$ROOT_DIR/logs/cloudflared.log"
-  systemctl --user restart threatlens-tunnel.service
   systemctl --user enable threatlens-tunnel.service
+  if ! systemctl --user is-active --quiet threatlens-tunnel.service || ! grep -Eo 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "$ROOT_DIR/logs/cloudflared.log" >/dev/null 2>&1; then
+    rm -f "$ROOT_DIR/logs/cloudflared.log"
+    systemctl --user restart threatlens-tunnel.service
+  fi
 fi
 
 echo "[DEPLOY] Waiting for public HTTPS tunnel URL..."

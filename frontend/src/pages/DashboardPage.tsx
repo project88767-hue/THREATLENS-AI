@@ -100,13 +100,22 @@ export const DashboardPage: React.FC = () => {
   ];
 
   const providers = Object.entries(data.engineHealth?.providers || {});
+  const allProvidersLive =
+    providers.length > 0 && providers.every(([, mode]) => mode.includes("LIVE"));
+  const hasDemoScans = data.recentScans.some((s) => s.isDemoData);
+  const headerBadge =
+    allProvidersLive && !hasDemoScans
+      ? "100% LIVE THREAT INTEL + LLM"
+      : allProvidersLive
+      ? "LIVE MULTI-ENGINE + LLM"
+      : "LIVE + DEMO BASELINE";
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Security Operations Dashboard"
         subtitle="Real-time threat intelligence telemetry, risk distribution, and active incident posture."
-        badge="LIVE + DEMO BASELINE"
+        badge={headerBadge}
         actions={
           <button
             onClick={loadDashboard}

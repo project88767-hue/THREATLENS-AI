@@ -130,3 +130,84 @@ adminRouter.get("/system-health", async (_req, res, next) => {
     next(err);
   }
 });
+
+adminRouter.delete("/demo-data", async (req, res, next) => {
+  try {
+    const demoScans = await prisma.scanResult.findMany({
+      where: { isDemoData: true },
+      select: { id: true, indicatorId: true },
+    });
+    const demoInvs = await prisma.investigation.findMany({
+      where: { isDemoData: true },
+      select: { id: true },
+    });
+    const demoIncs = await prisma.incident.findMany({
+      where: { isDemoData: true },
+      select: { id: true },
+    });
+
+    const invIds = demoInvs.map((i) => i.id);
+    const incIds = demoIncs.map((i) => i.id);
+    const scanIds = demoScans.map((s) => s.id);
+    const demoIndicatorIds = Array.from(
+      new Set(demoScans.map((s) => s.indicatorId).filter((id): id is string => Boolean(id)))
+    );
+
+    const deletedReports = await prisma.report.deleteMany({
+      where: {
+        OR: [
+          ...(invIds.length ? [{ investigationId: { in: invIds } }] : []),
+          ...(incIds.length ? [{ incidentId: { in: incIds } }] : []),
+          { title: { contains: "Seed" } },
+        ],
+      },
+    });
+    const deletedIncidents = await prisma.incident.deleteMany({
+      where: { isDemoData: true },
+    });
+    const deletedInvestigations = await prisma.investigation.deleteMany({
+      where: { isDemoData: true },
+    });
+    const deletedScans = await prisma.scanResult.deleteMany({
+      where: { id: { in: scanIds } },
+    });
+
+    let deletedIndicatorsCount = 0;
+    if (demoIndicatorIds.length > 0) {
+      const deletedIndicators = await prisma.indicator.deleteMany({
+        where: {
+          id: { in: demoIndicatorIds },
+          scans: { none: {} },
+        },
+      });
+      deletedIndicatorsCount = deletedIndicators.count;
+    }
+
+    await recordAudit({
+      req,
+      userId: req.user!.id,
+      actorEmail: req.user!.email,
+      action: "ADMIN_PURGED_DEMO_DATA",
+      resourceType: "System",
+      metadata: {
+        deletedScans: deletedScans.count,
+        deletedInvestigations: deletedInvestigations.count,
+        deletedIncidents: deletedIncidents.count,
+        deletedReports: deletedReports.count,
+        deletedIndicators: deletedIndicatorsCount,
+      },
+    });
+
+    res.json({
+      purged: {
+        scans: deletedScans.count,
+        investigations: deletedInvestigations.count,
+        incidents: deletedIncidents.count,
+        reports: deletedReports.count,
+        indicators: deletedIndicatorsCount,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});

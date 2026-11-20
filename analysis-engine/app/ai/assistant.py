@@ -46,7 +46,7 @@ async def run_investigation_assistant(req: AssistantRequest) -> AssistantRespons
         )
 
     settings = get_settings()
-    if settings.ai_api_key:
+    if settings.ai_api_key and settings.enable_live_public_lookups:
         try:
             messages = [{"role": "system", "content": SYSTEM_PROMPT}]
             if req.context:

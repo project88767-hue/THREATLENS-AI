@@ -12,7 +12,7 @@ from app.schemas import (
     ProviderStatus,
     ScoreFactor,
 )
-from app.scoring.engine import calculate_explainable_risk
+from app.scoring.engine import calculate_explainable_risk, enrich_explanation_with_live_llm
 from app.security.ssrf import validate_public_ip
 
 
@@ -78,8 +78,11 @@ async def analyze_ip(raw_ip: str) -> AnalysisResponse:
         "heuristic_engine": ProviderStatus(mode="LIVE", latency_ms=2, message="PTR & ASN heuristics"),
     }
 
-    risk_score, severity, confidence, verdict, summary, ai_explanation = calculate_explainable_risk(
+    risk_score, severity, confidence, verdict, summary, base_ai = calculate_explainable_risk(
         "IP", ip, factors, evidence, provider_status
+    )
+    ai_explanation = await enrich_explanation_with_live_llm(
+        "IP", ip, risk_score, severity, verdict, factors, evidence, base_ai
     )
 
     relations: list[ExtractedRelation] = []

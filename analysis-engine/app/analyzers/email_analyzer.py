@@ -11,7 +11,7 @@ from app.schemas import (
     ProviderStatus,
     ScoreFactor,
 )
-from app.scoring.engine import calculate_explainable_risk
+from app.scoring.engine import calculate_explainable_risk, enrich_explanation_with_live_llm
 
 URL_EXTRACT_RE = re.compile(r"https?://[^\s<>\"')]+", re.IGNORECASE)
 URGENCY_PATTERNS = (
@@ -240,8 +240,11 @@ async def analyze_email(payload: EmailScanRequest) -> AnalysisResponse:
         "safe_browsing": gsb_status,
     }
 
-    risk_score, severity, confidence, verdict, summary, ai_explanation = calculate_explainable_risk(
+    risk_score, severity, confidence, verdict, summary, base_ai = calculate_explainable_risk(
         "EMAIL", target_id, factors, evidence, provider_status
+    )
+    ai_explanation = await enrich_explanation_with_live_llm(
+        "EMAIL", target_id, risk_score, severity, verdict, factors, evidence, base_ai
     )
 
     relations: list[ExtractedRelation] = []

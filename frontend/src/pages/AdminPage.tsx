@@ -49,13 +49,45 @@ export const AdminPage: React.FC = () => {
     }
   };
 
+  const [purgeMsg, setPurgeMsg] = useState<string | null>(null);
+
+  const handlePurgeDemoData = async () => {
+    setError(null);
+    setPurgeMsg(null);
+    try {
+      const res = await apiRequest<{
+        purged: { scans: number; investigations: number; incidents: number; reports: number };
+      }>("/api/admin/demo-data", { method: "DELETE" });
+      setPurgeMsg(
+        `Purged demo records (${res.purged.scans} scans, ${res.purged.investigations} cases, ${res.purged.incidents} incidents).`
+      );
+      void loadAdminData();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Admin Governance & Security Audit"
         subtitle="Role-Based Access Control (RBAC) directory, OWASP Top 10 posture verification, and immutable audit logs."
         badge="ADMIN RESTRICTED"
+        actions={
+          <button
+            onClick={() => void handlePurgeDemoData()}
+            className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 transition"
+          >
+            Purge Seeded Demo Data
+          </button>
+        }
       />
+
+      {purgeMsg && (
+        <div className="p-3.5 rounded-lg bg-emerald-950/70 border border-emerald-500/40 text-xs text-emerald-200">
+          {purgeMsg}
+        </div>
+      )}
 
       {error && (
         <div className="p-3.5 rounded-lg bg-red-950/70 border border-red-500/40 text-xs text-red-200">

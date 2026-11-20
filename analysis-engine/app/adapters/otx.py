@@ -13,7 +13,7 @@ async def lookup_otx(
     settings = get_settings()
     start = time.perf_counter()
 
-    if settings.alienvault_otx_api_key:
+    if settings.alienvault_otx_api_key and settings.enable_live_public_lookups:
         headers = {"X-OTX-API-KEY": settings.alienvault_otx_api_key}
         section_map = {"ip": "IPv4", "domain": "domain", "url": "url"}
         otx_type = section_map.get(kind, "domain")
@@ -49,11 +49,17 @@ async def lookup_otx(
                 )
 
             resp.raise_for_status()
-            pulse_info = resp.json().get("pulse_info", {})
+            body_json = resp.json()
+            pulse_info = body_json.get("pulse_info", {})
+            whitelisted = bool(body_json.get("validation"))
             count = int(pulse_info.get("count", 0))
             pulses = [p.get("name", "Unnamed Pulse") for p in pulse_info.get("pulses", [])[:5]]
-            points = min(20, count * 4)
-            verdict = "MALICIOUS" if count >= 4 else ("SUSPICIOUS" if count >= 1 else "CLEAN")
+            if whitelisted:
+                points = 0
+                verdict = "CLEAN"
+            else:
+                points = min(20, count * 3)
+                verdict = "MALICIOUS" if count >= 10 else ("SUSPICIOUS" if count >= 2 else ("INFO" if count == 1 else "CLEAN"))
 
             return (
                 EvidenceItem(

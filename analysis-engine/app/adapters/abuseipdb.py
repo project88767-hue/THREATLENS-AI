@@ -61,7 +61,7 @@ async def lookup_abuseipdb(
     settings = get_settings()
     start = time.perf_counter()
 
-    if settings.abuseipdb_api_key:
+    if settings.abuseipdb_api_key and settings.enable_live_public_lookups:
         headers = {"Key": settings.abuseipdb_api_key, "Accept": "application/json"}
         params = {"ipAddress": ip, "maxAgeInDays": "90", "verbose": ""}
         try:

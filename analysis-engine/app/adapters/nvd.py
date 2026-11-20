@@ -197,7 +197,7 @@ def _parse_nvd_cve(cve_obj: dict[str, Any]) -> dict[str, Any]:
     cvss_score = 5.0
     cvss_vector = "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:L/A:N"
 
-    for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+    for key in ("cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
         metric_list = metrics.get(key, [])
         if metric_list:
             cvss_data = metric_list[0].get("cvssData", {})
@@ -236,9 +236,9 @@ def _build_cve_evidence(
     kev = bool(record.get("kev_listed", False))
     vector = str(record.get("cvss_vector", ""))
 
-    cvss_points = min(65, round(cvss * 6.5))
-    kev_points = 25 if kev else 0
-    network_points = 10 if "AV:N" in vector else 3
+    cvss_points = min(75, round(cvss * 7.5))
+    kev_points = 15 if kev else 0
+    network_points = 12 if "AV:N" in vector else 3
 
     verdict = "MALICIOUS" if (cvss >= 8.0 or kev) else ("SUSPICIOUS" if cvss >= 4.0 else "CLEAN")
     prefix = "[DEMO] " if is_simulated else ""

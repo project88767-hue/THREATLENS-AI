@@ -179,9 +179,13 @@ export const ScanResultPanel: React.FC<{ scan: ScanResult }> = ({ scan }) => {
               <Sparkles className="w-4 h-4 text-emerald-400" />
               AI Analyst Explanation & Playbook
             </h3>
-            {ai.is_simulated_ai && (
+            {ai.is_simulated_ai ? (
               <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
                 SOC Reasoning Engine
+              </span>
+            ) : (
+              <span className="text-[11px] font-mono px-2.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/40">
+                LIVE LLM AI
               </span>
             )}
           </div>

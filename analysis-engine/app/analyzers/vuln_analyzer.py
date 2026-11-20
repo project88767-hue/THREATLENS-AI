@@ -1,6 +1,6 @@
 from app.adapters.nvd import lookup_nvd
 from app.schemas import AnalysisResponse, ExtractedRelation, ProviderStatus
-from app.scoring.engine import calculate_explainable_risk
+from app.scoring.engine import calculate_explainable_risk, enrich_explanation_with_live_llm
 
 
 async def analyze_cve(cve_query: str) -> AnalysisResponse:
@@ -13,8 +13,11 @@ async def analyze_cve(cve_query: str) -> AnalysisResponse:
         "heuristic_engine": ProviderStatus(mode="LIVE", latency_ms=1, message="CVSS v3.1 & KEV scorer"),
     }
 
-    risk_score, severity, confidence, verdict, summary, ai_explanation = calculate_explainable_risk(
+    risk_score, severity, confidence, verdict, summary, base_ai = calculate_explainable_risk(
         "CVE", canonical_id, factors, evidence, provider_status
+    )
+    ai_explanation = await enrich_explanation_with_live_llm(
+        "CVE", canonical_id, risk_score, severity, verdict, factors, evidence, base_ai
     )
 
     relations = [

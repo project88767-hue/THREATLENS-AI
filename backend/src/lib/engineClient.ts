@@ -94,7 +94,7 @@ export async function callAnalysisEngine(
   payload: Record<string, unknown>
 ): Promise<EngineAnalysisResult> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
+  const timeout = setTimeout(() => controller.abort(), 22000);
 
   try {
     const res = await fetch(`${env.ANALYSIS_ENGINE_URL}${endpoint}`, {

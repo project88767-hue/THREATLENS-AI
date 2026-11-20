@@ -1,3 +1,6 @@
+import json
+import httpx
+from app.config import get_settings
 from app.schemas import (
     AiExplanation,
     EvidenceItem,
@@ -158,7 +161,10 @@ def default_recommendations(indicator_type: IndicatorType, score: int, target: s
         ]
 
     if score >= 80:
-        actions.insert(0, "ESCALATE IMMEDIATELY: Create a High/Critical SOC Incident and initiate containment playbook.")
+        actions.insert(
+            0,
+            "ESCALATE IMMEDIATELY: Create a High/Critical SOC Incident and initiate containment playbook.",
+        )
     return actions
 
 
@@ -172,7 +178,6 @@ def calculate_explainable_risk(
     raw_points = sum(max(0, f.points) for f in factors)
     risk_score = min(100, max(0, raw_points))
 
-    # Boost floor slightly if multiple independent malicious verdicts exist
     malicious_count = sum(1 for e in evidence if e.verdict == "MALICIOUS")
     if malicious_count >= 2 and risk_score < 75:
         risk_score = 75
@@ -182,7 +187,6 @@ def calculate_explainable_risk(
     severity = severity_from_score(risk_score)
     verdict = verdict_from_score(risk_score)
 
-    # Calculate confidence based on provider breadth and live vs demo telemetry
     total_providers = max(1, len(provider_status))
     live_count = sum(
         1 for p in provider_status.values() if p.mode in ("LIVE", "PUBLIC_LIVE")
@@ -236,3 +240,106 @@ def calculate_explainable_risk(
     )
 
     return risk_score, severity, confidence, verdict, summary, ai_explanation
+
+
+async def enrich_explanation_with_live_llm(
+    indicator_type: IndicatorType,
+    target: str,
+    risk_score: int,
+    severity: SeverityLevel,
+    verdict: str,
+    factors: list[ScoreFactor],
+    evidence: list[EvidenceItem],
+    fallback_ai: AiExplanation,
+) -> AiExplanation:
+    """
+    When AI_API_KEY (e.g., Groq Llama 3.3 70B) is configured and live lookups are enabled,
+    synthesizes a real-time Senior SOC Analyst explanation directly from the live provider telemetry.
+    """
+    settings = get_settings()
+    if not settings.ai_api_key or not settings.enable_live_public_lookups:
+        return fallback_ai
+
+    evidence_digest = [
+        {
+            "provider": e.provider,
+            "title": e.title,
+            "verdict": e.verdict,
+            "details": e.details,
+        }
+        for e in evidence
+    ]
+    factor_digest = [
+        {"factor": f.factor, "points": f.points, "max": f.max_points, "reason": f.reason}
+        for f in factors
+    ]
+
+    prompt = (
+        "You are THREATLENS AI, an elite Defensive SOC Analyst. "
+        "Given the live threat intelligence telemetry below, return ONLY valid JSON matching this exact schema:\n"
+        "{\n"
+        '  "overview": "2-3 sentence crisp technical executive assessment referencing actual vendor findings",\n'
+        '  "why_flagged": ["up to 4 concise evidence bullet strings"],\n'
+        '  "mitre_techniques": [{"id": "Txxxx", "name": "Technique Name", "tactic": "Tactic"}],\n'
+        '  "recommended_actions": ["3-4 concrete defensive SOC containment/hardening steps"]\n'
+        "}\n"
+        "If risk_score < 25, mitre_techniques can be []. Never include markdown fences outside JSON.\n\n"
+        f"Indicator Type: {indicator_type}\n"
+        f"Target: {target}\n"
+        f"Calculated Score: {risk_score}/100 ({severity} / {verdict})\n"
+        f"Score Factors: {json.dumps(factor_digest)[:2500]}\n"
+        f"Provider Evidence: {json.dumps(evidence_digest)[:3000]}"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=8.5) as client:
+            resp = await client.post(
+                f"{settings.ai_base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {settings.ai_api_key}"},
+                json={
+                    "model": settings.ai_model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "Respond strictly with valid JSON object only.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.15,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+        if resp.status_code == 200:
+            content = (
+                resp.json()
+                .get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+            parsed = json.loads(content)
+            mitre_list = [
+                MitreTechnique(
+                    id=str(m.get("id", "T1595")),
+                    name=str(m.get("name", "Threat Technique")),
+                    tactic=str(m.get("tactic", "Reconnaissance")),
+                )
+                for m in (parsed.get("mitre_techniques") or [])[:4]
+                if isinstance(m, dict) and m.get("id")
+            ]
+            return AiExplanation(
+                overview=str(parsed.get("overview") or fallback_ai.overview),
+                why_flagged=[
+                    str(x) for x in (parsed.get("why_flagged") or fallback_ai.why_flagged)[:5]
+                ],
+                mitre_techniques=mitre_list if mitre_list or risk_score < 25 else fallback_ai.mitre_techniques,
+                recommended_actions=[
+                    str(x)
+                    for x in (parsed.get("recommended_actions") or fallback_ai.recommended_actions)[:5]
+                ],
+                is_simulated_ai=False,
+            )
+    except Exception:
+        pass
+
+    return fallback_ai

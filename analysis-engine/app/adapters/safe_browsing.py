@@ -10,7 +10,7 @@ async def lookup_safe_browsing(
     settings = get_settings()
     start = time.perf_counter()
 
-    if settings.google_safe_browsing_api_key:
+    if settings.google_safe_browsing_api_key and settings.enable_live_public_lookups:
         endpoint = (
             "https://safebrowsing.googleapis.com/v4/threatMatches:find"
             f"?key={settings.google_safe_browsing_api_key}"

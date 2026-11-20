@@ -1,5 +1,6 @@
 import os
 os.environ["ENABLE_LIVE_PUBLIC_LOOKUPS"] = "false"
+os.environ["ENVIRONMENT"] = "test"
 
 from fastapi.testclient import TestClient
 from app.main import app
