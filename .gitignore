@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+**/node_modules/
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# Build outputs
+dist/
+**/dist/
+build/
+**/build/
+*.tsbuildinfo
+.expo/
+mobile/.expo/
+
+# Environment variables & secrets (NEVER commit real secrets)
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+analysis-engine/.env
+mobile/.env
+
+# Local dev PostgreSQL cluster & runtime logs
+.local-pg/
+.pids/
+logs/
+*.log
+npm-debug.log*
+
+# Coverage & test artifacts
+coverage/
+**/coverage/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

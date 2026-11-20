@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: threatlens-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: threatlens
+      POSTGRES_PASSWORD: threatlens_prod_change_me
+      POSTGRES_DB: threatlens
+    ports:
+      - "5432:5432"
+    volumes:
+      - threatlens_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U threatlens -d threatlens"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  analysis-engine:
+    build:
+      context: ./analysis-engine
+    container_name: threatlens-analysis-engine
+    restart: unless-stopped
+    environment:
+      PORT: 8088
+      ENVIRONMENT: production
+      INTERNAL_ENGINE_KEY: ${INTERNAL_ENGINE_KEY:-threatlens-internal-dev-key-change-in-prod}
+      VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
+      GOOGLE_SAFE_BROWSING_API_KEY: ${GOOGLE_SAFE_BROWSING_API_KEY:-}
+      ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
+      ALIENVAULT_OTX_API_KEY: ${ALIENVAULT_OTX_API_KEY:-}
+      NVD_API_KEY: ${NVD_API_KEY:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+    ports:
+      - "8088:8088"
+
+  backend:
+    build:
+      context: ./backend
+    container_name: threatlens-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      analysis-engine:
+        condition: service_started
+    environment:
+      PORT: 4000
+      NODE_ENV: production
+      DATABASE_URL: postgresql://threatlens:threatlens_prod_change_me@postgres:5432/threatlens?schema=public
+      JWT_SECRET: ${JWT_SECRET:-replace-with-a-minimum-32-char-cryptographic-secret-key}
+      FRONTEND_ORIGIN: http://localhost:5173
+      ANALYSIS_ENGINE_URL: http://analysis-engine:8088
+      INTERNAL_ENGINE_KEY: ${INTERNAL_ENGINE_KEY:-threatlens-internal-dev-key-change-in-prod}
+    ports:
+      - "4000:4000"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: threatlens-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+
+volumes:
+  threatlens_pgdata:

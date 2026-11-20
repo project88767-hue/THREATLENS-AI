@@ -1,0 +1,269 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  ANALYST
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum IndicatorType {
+  URL
+  DOMAIN
+  IP
+  EMAIL
+  CVE
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum Verdict {
+  CLEAN
+  SUSPICIOUS
+  MALICIOUS
+  INFO
+}
+
+enum InvestigationStatus {
+  OPEN
+  IN_PROGRESS
+  ESCALATED
+  CLOSED
+}
+
+enum IncidentStatus {
+  DETECTED
+  TRIAGING
+  CONTAINED
+  ERADICATED
+  RESOLVED
+}
+
+enum ReportFormat {
+  EXECUTIVE
+  TECHNICAL
+  COMPLIANCE
+}
+
+model User {
+  id                 String              @id @default(uuid())
+  email              String              @unique
+  name               String
+  passwordHash       String
+  role               Role                @default(ANALYST)
+  status             UserStatus          @default(ACTIVE)
+  department         String              @default("SOC Operations")
+  preferences        Json?
+  lastLoginAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  scans              ScanResult[]
+  ownedInvestigations Investigation[]    @relation("InvestigationOwner")
+  notes              InvestigationNote[]
+  assignedIncidents  Incident[]          @relation("IncidentAssignee")
+  generatedReports   Report[]
+  auditLogs          AuditLog[]
+
+  @@index([role, status])
+}
+
+model Indicator {
+  id              String        @id @default(uuid())
+  type            IndicatorType
+  value           String
+  normalizedValue String
+  riskScore       Int           @default(0)
+  severity        Severity      @default(LOW)
+  confidence      Int           @default(50)
+  verdict         Verdict       @default(CLEAN)
+  tags            String[]      @default([])
+  scanCount       Int           @default(1)
+  isDemoData      Boolean       @default(false)
+  firstSeenAt     DateTime      @default(now())
+  lastSeenAt      DateTime      @default(now())
+  scans           ScanResult[]
+
+  @@unique([type, normalizedValue])
+  @@index([severity, lastSeenAt])
+}
+
+model Investigation {
+  id          String              @id @default(uuid())
+  code        String              @unique
+  title       String
+  description String
+  status      InvestigationStatus @default(OPEN)
+  priority    Severity            @default(MEDIUM)
+  tags        String[]            @default([])
+  aiSummary   String?
+  isDemoData  Boolean             @default(false)
+  ownerId     String
+  owner       User                @relation("InvestigationOwner", fields: [ownerId], references: [id])
+  scans       ScanResult[]
+  evidence    Evidence[]
+  notes       InvestigationNote[]
+  incidents   Incident[]
+  reports     Report[]
+  relations   ThreatRelation[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@index([status, priority])
+}
+
+model InvestigationNote {
+  id              String        @id @default(uuid())
+  investigationId String
+  investigation   Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+  authorId        String
+  author          User          @relation(fields: [authorId], references: [id])
+  content         String
+  isAiGenerated   Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+
+  @@index([investigationId, createdAt])
+}
+
+model ScanResult {
+  id              String         @id @default(uuid())
+  indicatorId     String
+  indicator       Indicator      @relation(fields: [indicatorId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User           @relation(fields: [userId], references: [id])
+  investigationId String?
+  investigation   Investigation? @relation(fields: [investigationId], references: [id], onDelete: SetNull)
+  scanType        IndicatorType
+  targetValue     String
+  normalizedValue String
+  riskScore       Int
+  severity        Severity
+  confidence      Int
+  verdict         Verdict
+  summary         String
+  aiExplanation   Json
+  scoreBreakdown  Json
+  providerStatus  Json
+  metadata        Json?
+  isDemoData      Boolean        @default(false)
+  evidence        Evidence[]
+  createdAt       DateTime       @default(now())
+
+  @@index([scanType, createdAt])
+  @@index([severity, createdAt])
+}
+
+model Evidence {
+  id              String         @id @default(uuid())
+  scanResultId    String
+  scanResult      ScanResult     @relation(fields: [scanResultId], references: [id], onDelete: Cascade)
+  investigationId String?
+  investigation   Investigation? @relation(fields: [investigationId], references: [id], onDelete: SetNull)
+  provider        String
+  category        String
+  title           String
+  verdict         Verdict
+  weight          Int            @default(20)
+  details         Json
+  isSimulated     Boolean        @default(false)
+  createdAt       DateTime       @default(now())
+
+  @@index([provider, verdict])
+}
+
+model ThreatRelation {
+  id              String         @id @default(uuid())
+  sourceType      String
+  sourceValue     String
+  sourceLabel     String
+  targetType      String
+  targetValue     String
+  targetLabel     String
+  relation        String
+  confidence      Int            @default(80)
+  severity        Severity       @default(MEDIUM)
+  isDemoData      Boolean        @default(false)
+  investigationId String?
+  investigation   Investigation? @relation(fields: [investigationId], references: [id], onDelete: SetNull)
+  metadata        Json?
+  createdAt       DateTime       @default(now())
+
+  @@index([sourceType, targetType])
+}
+
+model Incident {
+  id              String         @id @default(uuid())
+  code            String         @unique
+  title           String
+  summary         String
+  severity        Severity       @default(HIGH)
+  status          IncidentStatus @default(DETECTED)
+  affectedAssets  String[]       @default([])
+  playbookSteps   Json
+  mitreTechniques String[]       @default([])
+  isDemoData      Boolean        @default(false)
+  assignedToId    String?
+  assignedTo      User?          @relation("IncidentAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  investigationId String?
+  investigation   Investigation? @relation(fields: [investigationId], references: [id], onDelete: SetNull)
+  reports         Report[]
+  resolvedAt      DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([status, severity])
+}
+
+model Report {
+  id               String         @id @default(uuid())
+  code             String         @unique
+  title            String
+  format           ReportFormat   @default(TECHNICAL)
+  summary          String
+  findingsMarkdown String
+  riskOverview     Json
+  recommendations  Json
+  isDemoData       Boolean        @default(false)
+  investigationId  String?
+  investigation    Investigation? @relation(fields: [investigationId], references: [id], onDelete: SetNull)
+  incidentId       String?
+  incident         Incident?      @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+  generatedById    String
+  generatedBy      User           @relation(fields: [generatedById], references: [id])
+  createdAt        DateTime       @default(now())
+
+  @@index([format, createdAt])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  actorEmail   String
+  action       String
+  resourceType String
+  resourceId   String?
+  ipAddress    String?
+  userAgent    String?
+  status       String   @default("SUCCESS")
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([action, createdAt])
+  @@index([actorEmail, createdAt])
+}

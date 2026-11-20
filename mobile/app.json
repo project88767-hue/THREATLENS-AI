@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "THREATLENS AI Mobile SOC",
+    "slug": "threatlens-ai-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#050811"
+    },
+    "android": {
+      "package": "com.threatlens.ai.soc",
+      "adaptiveIcon": {
+        "backgroundColor": "#050811"
+      }
+    }
+  }
+}
