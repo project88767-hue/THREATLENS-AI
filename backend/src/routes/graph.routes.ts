@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import { recordAudit } from "../lib/audit";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { sanitizeText } from "../middleware/errorHandler";
+import { relationScope, requireOwnedInvestigation, scanScope } from "../lib/access";
 
 export const graphRouter = Router();
 
@@ -24,19 +25,25 @@ const createRelationSchema = z.object({
 
 graphRouter.get("/", async (req, res, next) => {
   try {
-    const investigationId = req.query.investigationId as string | undefined;
+    const investigationId =
+      typeof req.query.investigationId === "string" ? req.query.investigationId : undefined;
     const relations = await prisma.threatRelation.findMany({
-      where: investigationId ? { investigationId } : {},
+      where: { ...relationScope(req.user!), ...(investigationId ? { investigationId } : {}) },
       orderBy: { createdAt: "desc" },
       take: 120,
     });
 
-    const indicators = await prisma.indicator.findMany({
-      select: { normalizedValue: true, riskScore: true, severity: true, type: true },
+    // Risk/severity come from THIS user's own latest scans, never from the shared indicator cache.
+    const ownScans = await prisma.scanResult.findMany({
+      where: scanScope(req.user!),
+      select: { normalizedValue: true, riskScore: true, severity: true, scanType: true },
+      orderBy: { createdAt: "desc" },
     });
-    const indicatorLookup = new Map(
-      indicators.map((ind) => [ind.normalizedValue.toLowerCase(), ind])
-    );
+    const indicatorLookup = new Map<string, (typeof ownScans)[number]>();
+    for (const scan of ownScans) {
+      const key = scan.normalizedValue.toLowerCase();
+      if (!indicatorLookup.has(key)) indicatorLookup.set(key, scan);
+    }
 
     const nodesMap = new Map<
       string,
@@ -106,6 +113,9 @@ graphRouter.post(
   async (req, res, next) => {
     try {
       const body = createRelationSchema.parse(req.body);
+      if (body.investigationId) {
+        await requireOwnedInvestigation(req.user!, body.investigationId);
+      }
       const relation = await prisma.threatRelation.create({
         data: {
           sourceType: body.sourceType,
@@ -118,6 +128,7 @@ graphRouter.post(
           confidence: body.confidence,
           severity: body.severity,
           investigationId: body.investigationId ?? null,
+          createdById: req.user!.id,
         },
       });
 

@@ -78,6 +78,8 @@ model User {
   notes              InvestigationNote[]
   assignedIncidents  Incident[]          @relation("IncidentAssignee")
   generatedReports   Report[]
+  createdIncidents   Incident[]          @relation("IncidentCreator")
+  createdRelations   ThreatRelation[]
   auditLogs          AuditLog[]
 
   @@index([role, status])
@@ -125,6 +127,7 @@ model Investigation {
   updatedAt   DateTime            @updatedAt
 
   @@index([status, priority])
+  @@index([ownerId, updatedAt])
 }
 
 model InvestigationNote {
@@ -166,6 +169,7 @@ model ScanResult {
 
   @@index([scanType, createdAt])
   @@index([severity, createdAt])
+  @@index([userId, createdAt])
 }
 
 model Evidence {
@@ -200,10 +204,13 @@ model ThreatRelation {
   isDemoData      Boolean        @default(false)
   investigationId String?
   investigation   Investigation? @relation(fields: [investigationId], references: [id], onDelete: SetNull)
+  createdById     String?
+  createdBy       User?          @relation(fields: [createdById], references: [id], onDelete: Cascade)
   metadata        Json?
   createdAt       DateTime       @default(now())
 
   @@index([sourceType, targetType])
+  @@index([createdById, createdAt])
 }
 
 model Incident {
@@ -219,6 +226,8 @@ model Incident {
   isDemoData      Boolean        @default(false)
   assignedToId    String?
   assignedTo      User?          @relation("IncidentAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  createdById     String?
+  createdBy       User?          @relation("IncidentCreator", fields: [createdById], references: [id], onDelete: SetNull)
   investigationId String?
   investigation   Investigation? @relation(fields: [investigationId], references: [id], onDelete: SetNull)
   reports         Report[]
@@ -227,6 +236,8 @@ model Incident {
   updatedAt       DateTime       @updatedAt
 
   @@index([status, severity])
+  @@index([createdById])
+  @@index([assignedToId])
 }
 
 model Report {
@@ -248,6 +259,7 @@ model Report {
   createdAt        DateTime       @default(now())
 
   @@index([format, createdAt])
+  @@index([generatedById, createdAt])
 }
 
 model AuditLog {

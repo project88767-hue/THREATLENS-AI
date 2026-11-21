@@ -2,13 +2,16 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { fetchEngineHealth } from "../lib/engineClient";
 import { requireAuth } from "../middleware/auth";
+import { incidentScope, investigationScope, scanScope } from "../lib/access";
 
 export const dashboardRouter = Router();
 
 dashboardRouter.use(requireAuth);
 
-dashboardRouter.get("/overview", async (_req, res, next) => {
+dashboardRouter.get("/overview", async (req, res, next) => {
   try {
+    const scans = scanScope(req.user!);
+    const incidents = incidentScope(req.user!);
     const [
       totalScans,
       criticalThreats,
@@ -22,24 +25,30 @@ dashboardRouter.get("/overview", async (_req, res, next) => {
       severityGroups,
       engineHealth,
     ] = await Promise.all([
-      prisma.scanResult.count(),
-      prisma.scanResult.count({ where: { severity: { in: ["CRITICAL", "HIGH"] } } }),
-      prisma.investigation.count({ where: { status: { not: "CLOSED" } } }),
-      prisma.incident.count({ where: { status: { not: "RESOLVED" } } }),
-      prisma.indicator.count(),
+      prisma.scanResult.count({ where: scans }),
+      prisma.scanResult.count({ where: { ...scans, severity: { in: ["CRITICAL", "HIGH"] } } }),
+      prisma.investigation.count({
+        where: { ...investigationScope(req.user!), status: { not: "CLOSED" } },
+      }),
+      prisma.incident.count({ where: { ...incidents, status: { not: "RESOLVED" } } }),
+      prisma.scanResult
+        .groupBy({ by: ["indicatorId"], where: scans })
+        .then((groups) => groups.length),
       prisma.scanResult.findMany({
+        where: scans,
         orderBy: { createdAt: "desc" },
         take: 8,
         include: { user: { select: { name: true } } },
       }),
       prisma.incident.findMany({
-        where: { status: { not: "RESOLVED" } },
+        where: { ...incidents, status: { not: "RESOLVED" } },
         orderBy: { createdAt: "desc" },
         take: 5,
         include: { assignedTo: { select: { name: true } } },
       }),
       prisma.scanResult.findMany({
         where: {
+          ...scans,
           createdAt: {
             gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
           },
@@ -48,10 +57,12 @@ dashboardRouter.get("/overview", async (_req, res, next) => {
       }),
       prisma.scanResult.groupBy({
         by: ["scanType"],
+        where: scans,
         _count: { _all: true },
       }),
       prisma.scanResult.groupBy({
         by: ["severity"],
+        where: scans,
         _count: { _all: true },
       }),
       fetchEngineHealth(),

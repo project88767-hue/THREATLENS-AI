@@ -1,6 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@prisma/client";
+import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { recordAudit } from "../lib/audit";
@@ -46,11 +47,16 @@ const updateProfileSchema = z.object({
   preferences: z.record(z.unknown()).optional(),
 });
 
+const AUTH_COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: "lax" as const,
+  secure: env.NODE_ENV === "production",
+  path: "/",
+};
+
 function setAuthCookie(res: import("express").Response, token: string): void {
   res.cookie("tl_token", token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: env.NODE_ENV === "production",
+    ...AUTH_COOKIE_OPTIONS,
     maxAge: 12 * 60 * 60 * 1000,
   });
 }
@@ -187,17 +193,28 @@ authRouter.post("/login", authLimiter, async (req, res, next) => {
   }
 });
 
-authRouter.post("/logout", requireAuth, async (req, res) => {
-  res.clearCookie("tl_token");
-  if (req.user) {
-    await recordAudit({
-      req,
-      userId: req.user.id,
-      actorEmail: req.user.email,
-      action: "AUTH_LOGOUT",
-      resourceType: "Auth",
-      status: "SUCCESS",
-    });
+// Logout must always clear the session cookie — even when the token is expired or the
+// account was suspended — otherwise a stale cookie keeps shadowing the next login.
+authRouter.post("/logout", async (req, res) => {
+  res.clearCookie("tl_token", AUTH_COOKIE_OPTIONS);
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith("Bearer ")
+      ? authHeader.slice(7).trim()
+      : (req.cookies?.tl_token as string | undefined);
+    if (token) {
+      const decoded = jwt.verify(token, env.JWT_SECRET) as { sub: string; email: string };
+      await recordAudit({
+        req,
+        userId: decoded.sub,
+        actorEmail: decoded.email,
+        action: "AUTH_LOGOUT",
+        resourceType: "Auth",
+        status: "SUCCESS",
+      });
+    }
+  } catch {
+    // Invalid/expired token: nothing to audit, cookie is already cleared.
   }
   res.json({ message: "Signed out successfully." });
 });

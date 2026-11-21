@@ -10,6 +10,7 @@ import {
 } from "../lib/engineClient";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { scanLimiter } from "../middleware/rateLimiters";
+import { requireOwnedInvestigation, scanScope } from "../lib/access";
 
 export const scanRouter = Router();
 
@@ -42,6 +43,16 @@ const cveScanSchema = z.object({
   cveId: z.string().min(2).max(120),
   investigationId: z.string().uuid().optional(),
 });
+
+// Indicators are a shared reputation cache across accounts: never expose scanCount /
+// firstSeen / lastSeen, which would reveal other users' scanning activity.
+const INDICATOR_PUBLIC_FIELDS = {
+  id: true,
+  type: true,
+  value: true,
+  normalizedValue: true,
+  tags: true,
+} as const;
 
 async function persistAnalysisResult(
   userId: string,
@@ -111,7 +122,7 @@ async function persistAnalysisResult(
     },
     include: {
       evidence: true,
-      indicator: true,
+      indicator: { select: INDICATOR_PUBLIC_FIELDS },
       user: { select: { id: true, name: true, email: true } },
     },
   });
@@ -120,6 +131,7 @@ async function persistAnalysisResult(
   for (const rel of analysis.extracted_relations ?? []) {
     const exists = await prisma.threatRelation.findFirst({
       where: {
+        createdById: userId,
         sourceValue: rel.source_value,
         targetValue: rel.target_value,
         relation: rel.relation,
@@ -138,6 +150,7 @@ async function persistAnalysisResult(
           confidence: rel.confidence,
           severity,
           investigationId: investigationId ?? null,
+          createdById: userId,
         },
       });
     }
@@ -148,12 +161,13 @@ async function persistAnalysisResult(
 
 scanRouter.get("/", async (req, res, next) => {
   try {
-    const typeFilter = req.query.type as IndicatorType | undefined;
-    const severityFilter = req.query.severity as Severity | undefined;
+    const typeFilter = z.nativeEnum(IndicatorType).optional().parse(req.query.type || undefined);
+    const severityFilter = z.nativeEnum(Severity).optional().parse(req.query.severity || undefined);
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 25));
 
     const scans = await prisma.scanResult.findMany({
       where: {
+        ...scanScope(req.user!),
         ...(typeFilter ? { scanType: typeFilter } : {}),
         ...(severityFilter ? { severity: severityFilter } : {}),
       },
@@ -174,11 +188,11 @@ scanRouter.get("/", async (req, res, next) => {
 
 scanRouter.get("/:id", async (req, res, next) => {
   try {
-    const scan = await prisma.scanResult.findUnique({
-      where: { id: req.params.id },
+    const scan = await prisma.scanResult.findFirst({
+      where: { id: req.params.id, ...scanScope(req.user!) },
       include: {
         evidence: true,
-        indicator: true,
+        indicator: { select: INDICATOR_PUBLIC_FIELDS },
         user: { select: { id: true, name: true, email: true } },
         investigation: { select: { id: true, code: true, title: true } },
       },
@@ -200,6 +214,9 @@ scanRouter.post(
   async (req, res, next) => {
     try {
       const body = urlScanSchema.parse(req.body);
+      if (body.investigationId) {
+        await requireOwnedInvestigation(req.user!, body.investigationId);
+      }
       enforceBackendSsrfGuard(body.url, "URL");
       const analysis = await callAnalysisEngine("/api/v1/analyze/url", { url: body.url });
       const scan = await persistAnalysisResult(req.user!.id, analysis, body.investigationId);
@@ -228,6 +245,9 @@ scanRouter.post(
   async (req, res, next) => {
     try {
       const body = ipScanSchema.parse(req.body);
+      if (body.investigationId) {
+        await requireOwnedInvestigation(req.user!, body.investigationId);
+      }
       enforceBackendSsrfGuard(body.ip, "IP");
       const analysis = await callAnalysisEngine("/api/v1/analyze/ip", { ip: body.ip });
       const scan = await persistAnalysisResult(req.user!.id, analysis, body.investigationId);
@@ -256,6 +276,9 @@ scanRouter.post(
   async (req, res, next) => {
     try {
       const body = domainScanSchema.parse(req.body);
+      if (body.investigationId) {
+        await requireOwnedInvestigation(req.user!, body.investigationId);
+      }
       enforceBackendSsrfGuard(body.domain, "DOMAIN");
       const analysis = await callAnalysisEngine("/api/v1/analyze/domain", {
         domain: body.domain,
@@ -286,6 +309,9 @@ scanRouter.post(
   async (req, res, next) => {
     try {
       const body = emailScanSchema.parse(req.body);
+      if (body.investigationId) {
+        await requireOwnedInvestigation(req.user!, body.investigationId);
+      }
       if (!body.rawHeaders.trim() && !body.body.trim()) {
         res.status(400).json({ error: "Provide email headers or body to analyze." });
         return;
@@ -322,6 +348,9 @@ scanRouter.post(
   async (req, res, next) => {
     try {
       const body = cveScanSchema.parse(req.body);
+      if (body.investigationId) {
+        await requireOwnedInvestigation(req.user!, body.investigationId);
+      }
       const analysis = await callAnalysisEngine("/api/v1/analyze/cve", { cve_id: body.cveId });
       const scan = await persistAnalysisResult(req.user!.id, analysis, body.investigationId);
 

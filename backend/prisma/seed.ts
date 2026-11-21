@@ -379,6 +379,7 @@ async function main() {
         confidence: 94,
         severity: "CRITICAL",
         isDemoData: true,
+        createdById: analyst.id,
         investigationId: invPhish.id,
       },
       {
@@ -392,6 +393,7 @@ async function main() {
         confidence: 96,
         severity: "CRITICAL",
         isDemoData: true,
+        createdById: analyst.id,
         investigationId: invPhish.id,
       },
       {
@@ -405,6 +407,7 @@ async function main() {
         confidence: 99,
         severity: "HIGH",
         isDemoData: true,
+        createdById: analyst.id,
         investigationId: invPhish.id,
       },
       {
@@ -418,6 +421,7 @@ async function main() {
         confidence: 95,
         severity: "CRITICAL",
         isDemoData: true,
+        createdById: analyst.id,
         investigationId: invPhish.id,
       },
       {
@@ -431,6 +435,7 @@ async function main() {
         confidence: 84,
         severity: "HIGH",
         isDemoData: true,
+        createdById: analyst.id,
         investigationId: invVuln.id,
       },
       {
@@ -444,6 +449,7 @@ async function main() {
         confidence: 90,
         severity: "CRITICAL",
         isDemoData: true,
+        createdById: analyst.id,
         investigationId: invVuln.id,
       },
     ],
@@ -498,6 +504,7 @@ async function main() {
       ],
       isDemoData: true,
       assignedToId: analyst.id,
+      createdById: analyst.id,
       investigationId: invPhish.id,
     },
   });

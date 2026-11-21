@@ -5,6 +5,7 @@ import { recordAudit } from "../lib/audit";
 import { callAssistantEngine } from "../lib/engineClient";
 import { requireAuth } from "../middleware/auth";
 import { scanLimiter } from "../middleware/rateLimiters";
+import { investigationScope, scanScope } from "../lib/access";
 
 export const assistantRouter = Router();
 
@@ -32,43 +33,47 @@ assistantRouter.post("/chat", scanLimiter, async (req, res, next) => {
     let context: Record<string, unknown> = {};
 
     if (body.investigationId) {
-      const inv = await prisma.investigation.findUnique({
-        where: { id: body.investigationId },
+      const inv = await prisma.investigation.findFirst({
+        where: { id: body.investigationId, ...investigationScope(req.user!) },
         include: {
           scans: { take: 5, orderBy: { createdAt: "desc" } },
           incidents: { take: 3 },
         },
       });
-      if (inv) {
-        context = {
-          investigationCode: inv.code,
-          investigationTitle: inv.title,
-          priority: inv.priority,
-          status: inv.status,
-          recentScans: inv.scans.map((s) => ({
-            type: s.scanType,
-            target: s.targetValue,
-            riskScore: s.riskScore,
-            severity: s.severity,
-            summary: s.summary,
-          })),
-        };
+      if (!inv) {
+        res.status(404).json({ error: "Investigation not found." });
+        return;
       }
+      context = {
+        investigationCode: inv.code,
+        investigationTitle: inv.title,
+        priority: inv.priority,
+        status: inv.status,
+        recentScans: inv.scans.map((s) => ({
+          type: s.scanType,
+          target: s.targetValue,
+          riskScore: s.riskScore,
+          severity: s.severity,
+          summary: s.summary,
+        })),
+      };
     } else if (body.scanId) {
-      const scan = await prisma.scanResult.findUnique({
-        where: { id: body.scanId },
+      const scan = await prisma.scanResult.findFirst({
+        where: { id: body.scanId, ...scanScope(req.user!) },
         include: { evidence: true },
       });
-      if (scan) {
-        context = {
-          scanType: scan.scanType,
-          targetValue: scan.targetValue,
-          riskScore: scan.riskScore,
-          severity: scan.severity,
-          summary: scan.summary,
-          scoreBreakdown: scan.scoreBreakdown,
-        };
+      if (!scan) {
+        res.status(404).json({ error: "Scan result not found." });
+        return;
       }
+      context = {
+        scanType: scan.scanType,
+        targetValue: scan.targetValue,
+        riskScore: scan.riskScore,
+        severity: scan.severity,
+        summary: scan.summary,
+        scoreBreakdown: scan.scoreBreakdown,
+      };
     }
 
     const aiResponse = await callAssistantEngine({

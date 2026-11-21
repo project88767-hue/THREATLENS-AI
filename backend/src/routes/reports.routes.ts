@@ -5,6 +5,15 @@ import { prisma } from "../lib/prisma";
 import { recordAudit } from "../lib/audit";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { sanitizeText } from "../middleware/errorHandler";
+import {
+  createWithUniqueCode,
+  incidentScope,
+  investigationScope,
+  reportScope,
+  requireAccessibleIncident,
+  requireOwnedInvestigation,
+  scanScope,
+} from "../lib/access";
 
 export const reportsRouter = Router();
 
@@ -17,9 +26,10 @@ const generateReportSchema = z.object({
   incidentId: z.string().uuid().optional(),
 });
 
-reportsRouter.get("/", async (_req, res, next) => {
+reportsRouter.get("/", async (req, res, next) => {
   try {
     const reports = await prisma.report.findMany({
+      where: reportScope(req.user!),
       include: {
         generatedBy: { select: { id: true, name: true, email: true } },
         investigation: { select: { id: true, code: true, title: true } },
@@ -35,12 +45,15 @@ reportsRouter.get("/", async (_req, res, next) => {
 
 reportsRouter.get("/:id", async (req, res, next) => {
   try {
-    const report = await prisma.report.findUnique({
-      where: { id: req.params.id },
+    const report = await prisma.report.findFirst({
+      where: { id: req.params.id, ...reportScope(req.user!) },
       include: {
         generatedBy: { select: { id: true, name: true, email: true } },
         investigation: {
-          include: { scans: { include: { evidence: true } }, notes: true },
+          include: {
+            scans: { where: scanScope(req.user!), include: { evidence: true } },
+            notes: true,
+          },
         },
         incident: true,
       },
@@ -61,23 +74,33 @@ reportsRouter.post(
   async (req, res, next) => {
     try {
       const body = generateReportSchema.parse(req.body);
-      const count = await prisma.report.count();
-      const code = `RPT-2026-${String(count + 301).padStart(3, "0")}`;
+      if (body.investigationId) {
+        await requireOwnedInvestigation(req.user!, body.investigationId);
+      }
+      if (body.incidentId) {
+        await requireAccessibleIncident(req.user!, body.incidentId);
+      }
 
       const investigation = body.investigationId
-        ? await prisma.investigation.findUnique({
-            where: { id: body.investigationId },
-            include: { scans: true, incidents: true },
+        ? await prisma.investigation.findFirst({
+            where: { id: body.investigationId, ...investigationScope(req.user!) },
+            include: { scans: { where: scanScope(req.user!) }, incidents: true },
           })
         : null;
 
       const incident = body.incidentId
-        ? await prisma.incident.findUnique({ where: { id: body.incidentId } })
+        ? await prisma.incident.findFirst({
+            where: { id: body.incidentId, ...incidentScope(req.user!) },
+          })
         : null;
 
       const scans =
         investigation?.scans ??
-        (await prisma.scanResult.findMany({ orderBy: { createdAt: "desc" }, take: 5 }));
+        (await prisma.scanResult.findMany({
+          where: scanScope(req.user!),
+          orderBy: { createdAt: "desc" },
+          take: 5,
+        }));
 
       const avgRisk = scans.length
         ? Math.round(scans.reduce((acc, s) => acc + s.riskScore, 0) / scans.length)
@@ -98,7 +121,7 @@ reportsRouter.post(
 
       const findingsMarkdown = [
         `# ${sanitizeText(body.title)}`,
-        `**Report ID:** \`${code}\` | **Format:** \`${body.format}\` | **Author:** ${req.user!.name}`,
+        `**Report ID:** \`__REPORT_CODE__\` | **Format:** \`${body.format}\` | **Author:** ${req.user!.name}`,
         "",
         "## 1. Executive Assessment",
         summary,
@@ -123,30 +146,36 @@ reportsRouter.post(
         "Validate MFA session revocation and patch compliance on exposed assets.",
       ];
 
-      const report = await prisma.report.create({
-        data: {
-          code,
-          title: sanitizeText(body.title),
-          format: body.format,
-          summary,
-          findingsMarkdown,
-          riskOverview: {
-            analyzedCount: scans.length,
-            averageRiskScore: avgRisk,
-            peakRiskScore: maxRisk,
-            generatedAt: new Date().toISOString(),
-          } as Prisma.InputJsonValue,
-          recommendations: recommendations as Prisma.InputJsonValue,
-          investigationId: body.investigationId ?? null,
-          incidentId: body.incidentId ?? null,
-          generatedById: req.user!.id,
-        },
-        include: {
-          generatedBy: { select: { id: true, name: true, email: true } },
-          investigation: { select: { id: true, code: true, title: true } },
-          incident: { select: { id: true, code: true, title: true, severity: true } },
-        },
-      });
+      const report = await createWithUniqueCode(
+        "RPT-2026",
+        301,
+        () => prisma.report.count(),
+        (code) =>
+          prisma.report.create({
+            data: {
+              code,
+              title: sanitizeText(body.title),
+              format: body.format,
+              summary,
+              findingsMarkdown: findingsMarkdown.replace("__REPORT_CODE__", code),
+              riskOverview: {
+                analyzedCount: scans.length,
+                averageRiskScore: avgRisk,
+                peakRiskScore: maxRisk,
+                generatedAt: new Date().toISOString(),
+              } as Prisma.InputJsonValue,
+              recommendations: recommendations as Prisma.InputJsonValue,
+              investigationId: body.investigationId ?? null,
+              incidentId: body.incidentId ?? null,
+              generatedById: req.user!.id,
+            },
+            include: {
+              generatedBy: { select: { id: true, name: true, email: true } },
+              investigation: { select: { id: true, code: true, title: true } },
+              incident: { select: { id: true, code: true, title: true, severity: true } },
+            },
+          })
+      );
 
       await recordAudit({
         req,

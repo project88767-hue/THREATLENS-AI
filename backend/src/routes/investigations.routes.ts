@@ -5,6 +5,12 @@ import { prisma } from "../lib/prisma";
 import { recordAudit } from "../lib/audit";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { sanitizeText } from "../middleware/errorHandler";
+import {
+  createWithUniqueCode,
+  investigationScope,
+  requireOwnedInvestigation,
+  requireOwnedScan,
+} from "../lib/access";
 
 export const investigationsRouter = Router();
 
@@ -37,11 +43,12 @@ const attachScanSchema = z.object({
 
 investigationsRouter.get("/", async (req, res, next) => {
   try {
-    const status = req.query.status as InvestigationStatus | undefined;
-    const priority = req.query.priority as Severity | undefined;
+    const status = z.nativeEnum(InvestigationStatus).optional().parse(req.query.status || undefined);
+    const priority = z.nativeEnum(Severity).optional().parse(req.query.priority || undefined);
 
     const investigations = await prisma.investigation.findMany({
       where: {
+        ...investigationScope(req.user!),
         ...(status ? { status } : {}),
         ...(priority ? { priority } : {}),
       },
@@ -62,8 +69,8 @@ investigationsRouter.get("/", async (req, res, next) => {
 
 investigationsRouter.get("/:id", async (req, res, next) => {
   try {
-    const investigation = await prisma.investigation.findUnique({
-      where: { id: req.params.id },
+    const investigation = await prisma.investigation.findFirst({
+      where: { id: req.params.id, ...investigationScope(req.user!) },
       include: {
         owner: { select: { id: true, name: true, email: true } },
         scans: {
@@ -94,26 +101,33 @@ investigationsRouter.post(
   async (req, res, next) => {
     try {
       const body = createInvestigationSchema.parse(req.body);
-      const count = await prisma.investigation.count();
-      const code = `INV-2026-${String(count + 101).padStart(3, "0")}`;
+      if (body.scanId) {
+        await requireOwnedScan(req.user!, body.scanId);
+      }
 
-      const investigation = await prisma.investigation.create({
-        data: {
-          code,
-          title: sanitizeText(body.title),
-          description: sanitizeText(body.description),
-          priority: body.priority,
-          tags: body.tags.map(sanitizeText),
-          ownerId: req.user!.id,
-        },
-        include: {
-          owner: { select: { id: true, name: true, email: true } },
-        },
-      });
+      const investigation = await createWithUniqueCode(
+        "INV-2026",
+        101,
+        () => prisma.investigation.count(),
+        (code) =>
+          prisma.investigation.create({
+            data: {
+              code,
+              title: sanitizeText(body.title),
+              description: sanitizeText(body.description),
+              priority: body.priority,
+              tags: body.tags.map(sanitizeText),
+              ownerId: req.user!.id,
+            },
+            include: {
+              owner: { select: { id: true, name: true, email: true } },
+            },
+          })
+      );
 
       if (body.scanId) {
         await prisma.scanResult.updateMany({
-          where: { id: body.scanId },
+          where: { id: body.scanId, userId: req.user!.id },
           data: { investigationId: investigation.id },
         });
         await prisma.evidence.updateMany({
@@ -145,6 +159,7 @@ investigationsRouter.patch(
   async (req, res, next) => {
     try {
       const body = updateInvestigationSchema.parse(req.body);
+      await requireOwnedInvestigation(req.user!, req.params.id);
       const updated = await prisma.investigation.update({
         where: { id: req.params.id },
         data: {
@@ -183,6 +198,7 @@ investigationsRouter.post(
   async (req, res, next) => {
     try {
       const body = noteSchema.parse(req.body);
+      await requireOwnedInvestigation(req.user!, req.params.id);
       const note = await prisma.investigationNote.create({
         data: {
           investigationId: req.params.id,
@@ -207,6 +223,8 @@ investigationsRouter.post(
   async (req, res, next) => {
     try {
       const body = attachScanSchema.parse(req.body);
+      await requireOwnedInvestigation(req.user!, req.params.id);
+      await requireOwnedScan(req.user!, body.scanId);
       await prisma.scanResult.update({
         where: { id: body.scanId },
         data: { investigationId: req.params.id },

@@ -158,9 +158,12 @@ adminRouter.delete("/demo-data", async (req, res, next) => {
         OR: [
           ...(invIds.length ? [{ investigationId: { in: invIds } }] : []),
           ...(incIds.length ? [{ incidentId: { in: incIds } }] : []),
-          { title: { contains: "Seed" } },
+          { isDemoData: true },
         ],
       },
+    });
+    const deletedRelations = await prisma.threatRelation.deleteMany({
+      where: { isDemoData: true },
     });
     const deletedIncidents = await prisma.incident.deleteMany({
       where: { isDemoData: true },
@@ -194,6 +197,7 @@ adminRouter.delete("/demo-data", async (req, res, next) => {
         deletedInvestigations: deletedInvestigations.count,
         deletedIncidents: deletedIncidents.count,
         deletedReports: deletedReports.count,
+        deletedRelations: deletedRelations.count,
         deletedIndicators: deletedIndicatorsCount,
       },
     });
@@ -204,6 +208,7 @@ adminRouter.delete("/demo-data", async (req, res, next) => {
         investigations: deletedInvestigations.count,
         incidents: deletedIncidents.count,
         reports: deletedReports.count,
+        relations: deletedRelations.count,
         indicators: deletedIndicatorsCount,
       },
     });

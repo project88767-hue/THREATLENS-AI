@@ -5,6 +5,12 @@ import { prisma } from "../lib/prisma";
 import { recordAudit } from "../lib/audit";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { sanitizeText } from "../middleware/errorHandler";
+import {
+  createWithUniqueCode,
+  incidentScope,
+  requireAccessibleIncident,
+  requireOwnedInvestigation,
+} from "../lib/access";
 
 export const incidentsRouter = Router();
 
@@ -72,11 +78,12 @@ const DEFAULT_NIST_PLAYBOOK = [
 
 incidentsRouter.get("/", async (req, res, next) => {
   try {
-    const status = req.query.status as IncidentStatus | undefined;
-    const severity = req.query.severity as Severity | undefined;
+    const status = z.nativeEnum(IncidentStatus).optional().parse(req.query.status || undefined);
+    const severity = z.nativeEnum(Severity).optional().parse(req.query.severity || undefined);
 
     const incidents = await prisma.incident.findMany({
       where: {
+        ...incidentScope(req.user!),
         ...(status ? { status } : {}),
         ...(severity ? { severity } : {}),
       },
@@ -95,14 +102,26 @@ incidentsRouter.get("/", async (req, res, next) => {
 
 incidentsRouter.get("/:id", async (req, res, next) => {
   try {
-    const incident = await prisma.incident.findUnique({
-      where: { id: req.params.id },
+    const incident = await prisma.incident.findFirst({
+      where: { id: req.params.id, ...incidentScope(req.user!) },
       include: {
         assignedTo: { select: { id: true, name: true, email: true } },
         investigation: {
-          include: { scans: { take: 5, orderBy: { createdAt: "desc" } } },
+          select: {
+            id: true,
+            code: true,
+            title: true,
+            status: true,
+            priority: true,
+            // Only the viewer's own scans — an assignee must not read the creator's other evidence.
+            scans: {
+              where: { userId: req.user!.id },
+              take: 5,
+              orderBy: { createdAt: "desc" },
+            },
+          },
         },
-        reports: true,
+        reports: { where: { generatedById: req.user!.id } },
       },
     });
     if (!incident) {
@@ -121,27 +140,35 @@ incidentsRouter.post(
   async (req, res, next) => {
     try {
       const body = createIncidentSchema.parse(req.body);
-      const count = await prisma.incident.count();
-      const code = `INC-2026-${String(count + 201).padStart(3, "0")}`;
+      if (body.investigationId) {
+        await requireOwnedInvestigation(req.user!, body.investigationId);
+      }
 
-      const incident = await prisma.incident.create({
-        data: {
-          code,
-          title: sanitizeText(body.title),
-          summary: sanitizeText(body.summary),
-          severity: body.severity,
-          status: "DETECTED",
-          affectedAssets: body.affectedAssets.map(sanitizeText),
-          mitreTechniques: body.mitreTechniques.map(sanitizeText),
-          playbookSteps: (body.playbookSteps ?? DEFAULT_NIST_PLAYBOOK) as Prisma.InputJsonValue,
-          assignedToId: req.user!.id,
-          investigationId: body.investigationId ?? null,
-        },
-        include: {
-          assignedTo: { select: { id: true, name: true, email: true } },
-          investigation: { select: { id: true, code: true, title: true } },
-        },
-      });
+      const incident = await createWithUniqueCode(
+        "INC-2026",
+        201,
+        () => prisma.incident.count(),
+        (code) =>
+          prisma.incident.create({
+            data: {
+              code,
+              title: sanitizeText(body.title),
+              summary: sanitizeText(body.summary),
+              severity: body.severity,
+              status: "DETECTED",
+              affectedAssets: body.affectedAssets.map(sanitizeText),
+              mitreTechniques: body.mitreTechniques.map(sanitizeText),
+              playbookSteps: (body.playbookSteps ?? DEFAULT_NIST_PLAYBOOK) as Prisma.InputJsonValue,
+              assignedToId: req.user!.id,
+              createdById: req.user!.id,
+              investigationId: body.investigationId ?? null,
+            },
+            include: {
+              assignedTo: { select: { id: true, name: true, email: true } },
+              investigation: { select: { id: true, code: true, title: true } },
+            },
+          })
+      );
 
       if (body.investigationId) {
         await prisma.investigation.update({
@@ -173,6 +200,17 @@ incidentsRouter.patch(
   async (req, res, next) => {
     try {
       const body = updateIncidentSchema.parse(req.body);
+      await requireAccessibleIncident(req.user!, req.params.id);
+      if (body.assignedToId) {
+        const assignee = await prisma.user.findFirst({
+          where: { id: body.assignedToId, status: "ACTIVE" },
+          select: { id: true },
+        });
+        if (!assignee) {
+          res.status(400).json({ error: "Assignee must be an active user." });
+          return;
+        }
+      }
       const resolvedAt =
         body.status === "RESOLVED"
           ? new Date()
