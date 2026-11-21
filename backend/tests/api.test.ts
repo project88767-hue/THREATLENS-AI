@@ -1,16 +1,30 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
+import bcrypt from "bcryptjs";
 import { app } from "../src/app";
+import { prisma } from "../src/lib/prisma";
 
 describe("THREATLENS AI Backend Security & REST API Suite", () => {
   let adminToken = "";
+  let adminId = "";
   let analystToken = "";
   let viewerToken = "";
 
   beforeAll(async () => {
+    // The demo admin password is no longer published; use a throwaway admin for the suite.
+    const adminEmail = `test-admin-${Date.now()}@example.test`;
+    const adminUser = await prisma.user.create({
+      data: {
+        email: adminEmail,
+        name: "Test Admin",
+        role: "ADMIN",
+        passwordHash: await bcrypt.hash("TestAdmin12345", 4),
+      },
+    });
+    adminId = adminUser.id;
     const adminLogin = await request(app)
       .post("/api/auth/login")
-      .send({ email: "admin@threatlens.demo", password: "Admin@12345" });
+      .send({ email: adminEmail, password: "TestAdmin12345" });
     expect(adminLogin.status).toBe(200);
     adminToken = adminLogin.body.token;
 
@@ -25,6 +39,13 @@ describe("THREATLENS AI Backend Security & REST API Suite", () => {
       .send({ email: "viewer@threatlens.demo", password: "Viewer@12345" });
     expect(viewerLogin.status).toBe(200);
     viewerToken = viewerLogin.body.token;
+  });
+
+  afterAll(async () => {
+    if (adminId) {
+      await prisma.auditLog.deleteMany({ where: { userId: adminId } });
+      await prisma.user.delete({ where: { id: adminId } });
+    }
   });
 
   it("exposes health endpoint with security headers", async () => {

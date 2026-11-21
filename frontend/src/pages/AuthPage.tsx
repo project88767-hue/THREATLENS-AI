@@ -5,12 +5,6 @@ import { useAuth } from "../context/AuthContext";
 
 const DEMO_ACCOUNTS = [
   {
-    label: "SOC Director (ADMIN)",
-    email: "admin@threatlens.demo",
-    password: "Admin@12345",
-    role: "Full RBAC + Audit",
-  },
-  {
     label: "Threat Hunter (ANALYST)",
     email: "analyst@threatlens.demo",
     password: "Analyst@12345",

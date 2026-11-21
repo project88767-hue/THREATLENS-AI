@@ -96,7 +96,7 @@ docker compose up --build
 
 | Role | Email | Password | Permissions |
 | :--- | :--- | :--- | :--- |
-| **ADMIN** | `admin@threatlens.demo` | `Admin@12345` | Full Scans, Cases, Incidents, Reports, User RBAC & Audit Logs |
+| **ADMIN** | _(created privately — not published)_ | _n/a_ | Full Scans, Cases, Incidents, Reports, User RBAC & Audit Logs |
 | **ANALYST** | `analyst@threatlens.demo` | `Analyst@12345` | Full Scans, Investigations, Incidents, Graph & Reports |
 | **VIEWER** | `viewer@threatlens.demo` | `Viewer@12345` | Read-only SOC Dashboard, Cases, Incidents & Compliance Reports |
 

@@ -29,7 +29,8 @@ describe("THREATLENS AI Frontend Suite", () => {
       </AuthProvider>
     );
 
-    expect(screen.getByText(/SOC Director \(ADMIN\)/i)).toBeInTheDocument();
+    // The admin account must never be offered as a public one-click login.
+    expect(screen.queryByText(/SOC Director/i)).not.toBeInTheDocument();
     expect(screen.getByText(/Threat Hunter \(ANALYST\)/i)).toBeInTheDocument();
     expect(screen.getByText(/Auditor \(VIEWER\)/i)).toBeInTheDocument();
   });

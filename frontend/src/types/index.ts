@@ -211,6 +211,7 @@ export interface DashboardOverview {
   }>;
   indicatorDistribution: Array<{ name: string; value: number }>;
   severityDistribution: Array<{ severity: Severity; count: number }>;
+  verdictDistribution: Array<{ verdict: Verdict; count: number }>;
   recentScans: ScanResult[];
   activeIncidentsList: Incident[];
   engineHealth: {

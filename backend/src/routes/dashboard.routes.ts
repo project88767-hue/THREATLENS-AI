@@ -23,6 +23,7 @@ dashboardRouter.get("/overview", async (req, res, next) => {
       allScansLast7Days,
       typeGroups,
       severityGroups,
+      verdictGroups,
       engineHealth,
     ] = await Promise.all([
       prisma.scanResult.count({ where: scans }),
@@ -65,6 +66,11 @@ dashboardRouter.get("/overview", async (req, res, next) => {
         where: scans,
         _count: { _all: true },
       }),
+      prisma.scanResult.groupBy({
+        by: ["verdict"],
+        where: scans,
+        _count: { _all: true },
+      }),
       fetchEngineHealth(),
     ]);
 
@@ -103,6 +109,11 @@ dashboardRouter.get("/overview", async (req, res, next) => {
       count: severityGroups.find((g) => g.severity === sev)?._count._all ?? 0,
     }));
 
+    const verdictDistribution = ["MALICIOUS", "SUSPICIOUS", "CLEAN", "INFO"].map((verdict) => ({
+      verdict,
+      count: verdictGroups.find((g) => g.verdict === verdict)?._count._all ?? 0,
+    }));
+
     res.json({
       kpis: {
         totalScans,
@@ -114,6 +125,7 @@ dashboardRouter.get("/overview", async (req, res, next) => {
       trendData: Array.from(dayMap.values()),
       indicatorDistribution,
       severityDistribution,
+      verdictDistribution,
       recentScans,
       activeIncidentsList: incidentsList,
       engineHealth,
